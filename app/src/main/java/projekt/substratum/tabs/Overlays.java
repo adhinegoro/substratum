@@ -142,7 +142,6 @@ public class Overlays extends Fragment {
     private ProgressBar progressBar;
     private ArrayList<String> current_theme_overlays;
     private Boolean is_active = false;
-    private Boolean DEBUG = References.DEBUG;
     private String error_logs = "";
     private String themer_email, theme_author;
     private MaterialProgressBar materialProgressBar;
@@ -155,20 +154,16 @@ public class Overlays extends Fragment {
     private boolean isWaiting;
     private AssetManager themeAssetManager;
     private Boolean missingType3 = false;
+    private ViewGroup root;
+    private TextView toggle_all_overlays_text;
 
-    @Override
-    public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle
-            savedInstanceState) {
-        ViewGroup root = (ViewGroup) inflater.inflate(R.layout.tab_fragment_1, container, false);
+    public void updateGlobalVariables() {
         mContext = getContext();
         prefs = PreferenceManager.getDefaultSharedPreferences(mContext);
-
         theme_name = InformationActivity.getThemeName();
         theme_pid = InformationActivity.getThemePID();
-
         progressBar = (ProgressBar) root.findViewById(R.id.header_loading_bar);
         progressBar.setVisibility(View.GONE);
-
         materialProgressBar = (MaterialProgressBar) root.findViewById(R.id.progress_bar_loader);
 
         // Pre-initialize the adapter first so that it won't complain for skipping layout on logs
@@ -179,7 +174,7 @@ public class Overlays extends Fragment {
         RecyclerView.Adapter empty_adapter = new OverlaysAdapter(empty_array);
         mRecyclerView.setAdapter(empty_adapter);
 
-        TextView toggle_all_overlays_text = (TextView)
+        toggle_all_overlays_text = (TextView)
                 root.findViewById(R.id.toggle_all_overlays_text);
         toggle_all_overlays_text.setVisibility(View.VISIBLE);
 
@@ -191,62 +186,98 @@ public class Overlays extends Fragment {
                     "Updating the internal storage with proper file directories...");
         }
 
-        toggle_all = (Switch) root.findViewById(R.id.toggle_all_overlays);
-        toggle_all.setOnCheckedChangeListener(
-                (buttonView, isChecked) -> {
-                    try {
-                        overlaysLists = ((OverlaysAdapter) mAdapter).getOverlayList();
-                        for (int i = 0; i < overlaysLists.size(); i++) {
-                            OverlaysInfo currentOverlay = overlaysLists.get(i);
-                            currentOverlay.setSelected(isChecked);
-                            mAdapter.notifyDataSetChanged();
-                        }
-                    } catch (Exception e) {
-                        Log.e("Overlays", "Window has lost connection with the host.");
-                    }
-                });
-        RelativeLayout toggleZone = (RelativeLayout) root.findViewById(R.id.toggle_zone);
-        toggleZone.setOnClickListener(v -> {
-            try {
-                toggle_all.setChecked(!toggle_all.isChecked());
-                overlaysLists = ((OverlaysAdapter) mAdapter).getOverlayList();
-                for (int i = 0; i < overlaysLists.size(); i++) {
-                    OverlaysInfo currentOverlay = overlaysLists.get(i);
-                    currentOverlay.setSelected(toggle_all.isChecked());
-                    mAdapter.notifyDataSetChanged();
-                }
-            } catch (Exception e) {
-                Log.e("Overlays", "Window has lost connection with the host.");
-            }
-        });
-        swipeRefreshLayout = (SwipeRefreshLayout) root.findViewById(R.id.swipeRefreshLayout);
-        swipeRefreshLayout.setOnRefreshListener(() -> {
+    }
+
+    public boolean refreshAdapter(Boolean changeCheckedValue, Boolean refreshMode) {
+        try {
             overlaysLists = ((OverlaysAdapter) mAdapter).getOverlayList();
             for (int i = 0; i < overlaysLists.size(); i++) {
                 OverlaysInfo currentOverlay = overlaysLists.get(i);
-                currentOverlay.setSelected(false);
-                currentOverlay.updateEnabledOverlays(updateEnabledOverlays());
+                currentOverlay.setSelected(changeCheckedValue);
+                if (refreshMode) currentOverlay.updateEnabledOverlays(updateEnabledOverlays());
                 mAdapter.notifyDataSetChanged();
             }
+            return true;
+        } catch (Exception e) {
+            Log.e("Overlays", "Window has lost connection with the host.");
+        }
+        return false;
+    }
+
+    public void updateCheckedOverlays() {
+        overlaysLists = ((OverlaysAdapter) mAdapter).getOverlayList();
+        checkedOverlays = new ArrayList<>();
+
+        for (int i = 0; i < overlaysLists.size(); i++) {
+            OverlaysInfo currentOverlay = overlaysLists.get(i);
+            if (currentOverlay.isSelected()) {
+                checkedOverlays.add(currentOverlay);
+            }
+        }
+    }
+
+    public void beginCompile() {
+        if (!checkedOverlays.isEmpty()) {
+            if (base_spinner.getSelectedItemPosition() != 0 &&
+                    base_spinner.getVisibility() == View.VISIBLE) {
+                Phase2_InitializeCache phase2_initializeCache = new
+                        Phase2_InitializeCache();
+                phase2_initializeCache.execute(base_spinner.getSelectedItem()
+                        .toString());
+            } else {
+                Phase2_InitializeCache phase2_initializeCache = new
+                        Phase2_InitializeCache();
+                phase2_initializeCache.execute("");
+            }
+        } else {
+            if (toggle_all.isChecked()) toggle_all.setChecked(false);
+            is_active = false;
+            Toast toast2 = Toast.makeText(mContext, getString(R
+                            .string.toast_disabled5),
+                    Toast.LENGTH_SHORT);
+            toast2.show();
+        }
+    }
+
+    @Override
+    public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle
+            savedInstanceState) {
+        root = (ViewGroup) inflater.inflate(R.layout.tab_fragment_1, container, false);
+
+        updateGlobalVariables();
+
+        // Set parameters for the toggle and switchbar
+        toggle_all = (Switch) root.findViewById(R.id.toggle_all_overlays);
+        toggle_all.setOnCheckedChangeListener(
+                (buttonView, isChecked) -> refreshAdapter(isChecked, false));
+        RelativeLayout toggleZone = (RelativeLayout) root.findViewById(R.id.toggle_zone);
+        toggleZone.setOnClickListener(v -> {
+            toggle_all.setChecked(!toggle_all.isChecked());
+            refreshAdapter(toggle_all.isChecked(), false);
+        });
+
+        // Set parameters for the swipe refresh layout when a user swipes to refresh the list
+        swipeRefreshLayout = (SwipeRefreshLayout) root.findViewById(R.id.swipeRefreshLayout);
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            refreshAdapter(false, true);
             swipeRefreshLayout.setRefreshing(false);
         });
         swipeRefreshLayout.setVisibility(View.GONE);
 
+        // Set parameters for the sheet fab that gets invoked when the user clicks on the fab
         View sheetView = root.findViewById(R.id.fab_sheet);
         View overlay = root.findViewById(R.id.overlay);
         int sheetColor = mContext.getColor(R.color.fab_menu_background_card);
         int fabColor = mContext.getColor(R.color.fab_background_color);
-
-        final FloatingActionMenu floatingActionButton = (FloatingActionMenu) root.findViewById(R
-                .id.apply_fab);
+        FloatingActionMenu floatingActionButton =
+                (FloatingActionMenu) root.findViewById(R.id.apply_fab);
         floatingActionButton.show();
-
-        // Create material sheet FAB
         if (sheetView != null && overlay != null) {
-            materialSheetFab = new MaterialSheetFab<>(floatingActionButton, sheetView, overlay,
-                    sheetColor, fabColor);
+            materialSheetFab = new MaterialSheetFab<>(
+                    floatingActionButton, sheetView, overlay, sheetColor, fabColor);
         }
 
+        // Set parameters for the Mix and Match toggle on the top of the sheet fab
         Switch enable_swap = (Switch) root.findViewById(R.id.enable_swap);
         if (!References.checkOMS(mContext))
             enable_swap.setText(getString(R.string.fab_menu_swap_toggle_legacy));
@@ -269,10 +300,10 @@ public class Overlays extends Fragment {
             });
         }
 
-        final TextView compile_enable_selected = (TextView) root.findViewById(R.id
-                .compile_enable_selected);
-        if (!References.checkOMS(mContext))
-            compile_enable_selected.setVisibility(View.GONE);
+        // Set parameters for the Compile & Enable toggle
+        TextView compile_enable_selected = (TextView)
+                root.findViewById(R.id.compile_enable_selected);
+        if (!References.checkOMS(mContext)) compile_enable_selected.setVisibility(View.GONE);
         if (compile_enable_selected != null)
             compile_enable_selected.setOnClickListener(v -> {
                 materialSheetFab.hideSheet();
@@ -281,16 +312,8 @@ public class Overlays extends Fragment {
                     compile_enable_mode = true;
                     enable_mode = false;
                     disable_mode = false;
+                    updateCheckedOverlays();
 
-                    overlaysLists = ((OverlaysAdapter) mAdapter).getOverlayList();
-                    checkedOverlays = new ArrayList<>();
-
-                    for (int i = 0; i < overlaysLists.size(); i++) {
-                        OverlaysInfo currentOverlay = overlaysLists.get(i);
-                        if (currentOverlay.isSelected()) {
-                            checkedOverlays.add(currentOverlay);
-                        }
-                    }
                     if (!checkedOverlays.isEmpty()) {
                         if (base_spinner.getSelectedItemPosition() != 0 &&
                                 base_spinner.getVisibility() == View.VISIBLE) {
@@ -314,46 +337,18 @@ public class Overlays extends Fragment {
                 }
             });
 
+        // Set parameters for the Compile & Update toggle
         TextView compile_update_selected = (TextView) root.findViewById(R.id
                 .compile_update_selected);
-        if (!References.checkOMS(mContext))
-            compile_update_selected.setText(getString(R.string.fab_menu_compile_install));
+        if (!References.checkOMS(mContext)) compile_update_selected.setText(getString(R.string.fab_menu_compile_install));
         if (compile_update_selected != null)
             compile_update_selected.setOnClickListener(v -> {
                 materialSheetFab.hideSheet();
                 if (!is_active) {
                     is_active = true;
                     compile_enable_mode = false;
-
-                    overlaysLists = ((OverlaysAdapter) mAdapter).getOverlayList();
-                    checkedOverlays = new ArrayList<>();
-
-                    for (int i = 0; i < overlaysLists.size(); i++) {
-                        OverlaysInfo currentOverlay = overlaysLists.get(i);
-                        if (currentOverlay.isSelected()) {
-                            checkedOverlays.add(currentOverlay);
-                        }
-                    }
-                    if (!checkedOverlays.isEmpty()) {
-                        if (base_spinner.getSelectedItemPosition() != 0 &&
-                                base_spinner.getVisibility() == View.VISIBLE) {
-                            Phase2_InitializeCache phase2_initializeCache = new
-                                    Phase2_InitializeCache();
-                            phase2_initializeCache.execute(base_spinner.getSelectedItem()
-                                    .toString());
-                        } else {
-                            Phase2_InitializeCache phase2_initializeCache = new
-                                    Phase2_InitializeCache();
-                            phase2_initializeCache.execute("");
-                        }
-                    } else {
-                        if (toggle_all.isChecked()) toggle_all.setChecked(false);
-                        is_active = false;
-                        Toast toast2 = Toast.makeText(mContext, getString(R
-                                        .string.toast_disabled5),
-                                Toast.LENGTH_SHORT);
-                        toast2.show();
-                    }
+                    updateCheckedOverlays();
+                    beginCompile();
                 }
             });
 
